@@ -5,16 +5,30 @@ import (
 	"os"
 )
 
-type ExportData struct {
-	Symbol  string    `json:"symbol"`
-	Prices  []float64 `json:"prices"`
-	Average float64   `json:"average"`
-	Highest float64   `json:"highest"`
-	Lowest  float64   `json:"lowest"`
-}
+func ExportData(store *PriceStore, filename string) error {
+	store.mu.Lock()
+	dataCopy := make(map[string][]float64, len(store.data))
+	for symbol, prices := range store.data {
+		pricesCopy := make([]float64, len(prices))
+		copy(pricesCopy, prices)
+		dataCopy[symbol] = pricesCopy
+	}
+	store.mu.Unlock() // Unlock early
 
-func SaveToJSON(data ExportData) error {
-	file, err := os.Create(data.Symbol + "_prices.json")
+	// Step 2: Prepare final data with stats
+	finalData := map[string]interface{}{}
+	for symbol, prices := range dataCopy {
+		avg, high, low := GetStats(prices) // Deadlock-free
+		finalData[symbol] = map[string]interface{}{
+			"prices": prices,
+			"avg":    avg,
+			"high":   high,
+			"low":    low,
+		}
+	}
+
+	// Step 3: Write JSON to file
+	file, err := os.Create(filename)
 	if err != nil {
 		return err
 	}
@@ -22,6 +36,5 @@ func SaveToJSON(data ExportData) error {
 
 	encoder := json.NewEncoder(file)
 	encoder.SetIndent("", "  ")
-
-	return encoder.Encode(data)
+	return encoder.Encode(finalData)
 }

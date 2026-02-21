@@ -131,4 +131,18 @@ func main() {
 
 	wg.Wait()
 	logInfo("All symbols fetched")
+
+	err := SaveToCSV(store, "prices.csv")
+	if err != nil {
+		logError("CSV export failed: %v", err)
+	} else {
+		logInfo("Prices saved to prices.csv")
+	}
+
+	err = ExportData(store, "prices.json")
+	if err != nil {
+		logError("JSON export failed: %v", err)
+	} else {
+		logInfo("Prices saved to prices.json")
+	}
 }

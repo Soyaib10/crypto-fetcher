@@ -6,8 +6,9 @@ import (
 	"strconv"
 )
 
-func SaveToCSV(symbol string, prices []float64) error {
-	file, err := os.Create(symbol + "_prices.csv")
+// Save prices to CSV
+func SaveToCSV(store *PriceStore, filename string) error {
+	file, err := os.Create(filename)
 	if err != nil {
 		return err
 	}
@@ -16,12 +17,26 @@ func SaveToCSV(symbol string, prices []float64) error {
 	writer := csv.NewWriter(file)
 	defer writer.Flush()
 
-	writer.Write([]string{"symbol", "price"})
+	// Header
+	writer.Write([]string{"Symbol", "Prices", "Avg", "High", "Low"})
 
-	for _, p := range prices {
+	// Data
+	for symbol := range store.data {
+		prices := store.GetPrices(symbol)
+		avg, high, low := store.GetStats(symbol)
+		pricesStr := ""
+		for i, p := range prices {
+			if i != 0 {
+				pricesStr += ";"
+			}
+			pricesStr += strconv.FormatFloat(p, 'f', 2, 64)
+		}
 		writer.Write([]string{
 			symbol,
-			strconv.FormatFloat(p, 'f', -1, 64),
+			pricesStr,
+			strconv.FormatFloat(avg, 'f', 2, 64),
+			strconv.FormatFloat(high, 'f', 2, 64),
+			strconv.FormatFloat(low, 'f', 2, 64),
 		})
 	}
 
