@@ -1,13 +1,15 @@
-package main
+package export
 
 import (
+	"crypto-fetcher/store"
 	"encoding/csv"
 	"os"
 	"strconv"
 )
 
-// Save prices to CSV
-func SaveToCSV(store *PriceStore, filename string) error {
+type CSVExporter struct{}
+
+func (c CSVExporter) Export(store *store.PriceStore, filename string) error {
 	file, err := os.Create(filename)
 	if err != nil {
 		return err
@@ -17,13 +19,13 @@ func SaveToCSV(store *PriceStore, filename string) error {
 	writer := csv.NewWriter(file)
 	defer writer.Flush()
 
-	// Header
 	writer.Write([]string{"Symbol", "Prices", "Avg", "High", "Low"})
 
-	// Data
-	for symbol := range store.data {
-		prices := store.GetPrices(symbol)
-		avg, high, low := store.GetStats(symbol)
+	// Use getter
+	dataCopy := store.GetAllData()
+
+	for symbol, prices := range dataCopy {
+		avg, high, low := store.CalculateStats(prices)
 		pricesStr := ""
 		for i, p := range prices {
 			if i != 0 {

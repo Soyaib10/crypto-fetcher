@@ -1,24 +1,11 @@
 package logger
 
-import (
-	"log"
-	"os"
-)
+import "fmt"
 
-var (
-	InfoLogger  *log.Logger
-	ErrorLogger *log.Logger
-)
-
-func Init() {
-	InfoLogger = log.New(os.Stdout, "INFO: ", log.Ldate|log.Ltime|'\n')
-	ErrorLogger = log.New(os.Stderr, "ERROR: ", log.Ldate|log.Ltime|'\n')
+func LogInfo(format string, a ...interface{}) {
+	fmt.Printf("[INFO] "+format+"\n", a...)
 }
 
-func Info(msg string, args ...interface{}) {
-	InfoLogger.Printf(msg, args...)
-}
-
-func Error(msg string, args ...interface{}) {
-	ErrorLogger.Printf(msg, args...)
+func LogError(format string, a ...interface{}) {
+	fmt.Printf("[ERROR] "+format+"\n", a...)
 }
