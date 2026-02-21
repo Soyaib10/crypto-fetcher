@@ -1,17 +1,28 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"strconv"
-
-	"crypto-fetcher/logger"
+	"sync"
+	"time"
 )
 
+// --- Logger (simple) ---
+func logInfo(format string, a ...interface{}) {
+	fmt.Printf("[INFO] "+format+"\n", a...)
+}
+func logError(format string, a ...interface{}) {
+	fmt.Printf("[ERROR] "+format+"\n", a...)
+}
+
+// --- PriceStore ---
 type PriceStore struct {
 	data map[string][]float64
+	mu   sync.Mutex
 }
 
 func NewPriceStore() *PriceStore {
@@ -21,23 +32,26 @@ func NewPriceStore() *PriceStore {
 }
 
 func (ps *PriceStore) SetPrices(symbol string, prices []float64) {
+	ps.mu.Lock()
+	defer ps.mu.Unlock()
 	ps.data[symbol] = prices
 }
 
 func (ps *PriceStore) GetPrices(symbol string) []float64 {
+	ps.mu.Lock()
+	defer ps.mu.Unlock()
 	return ps.data[symbol]
 }
 
 func (ps *PriceStore) GetStats(symbol string) (avg, high, low float64) {
+	ps.mu.Lock()
+	defer ps.mu.Unlock()
 	prices := ps.data[symbol]
 	if len(prices) == 0 {
 		return 0, 0, 0
 	}
-
+	high, low = prices[0], prices[0]
 	sum := 0.0
-	high = prices[0]
-	low = prices[0]
-
 	for _, p := range prices {
 		sum += p
 		if p > high {
@@ -47,29 +61,29 @@ func (ps *PriceStore) GetStats(symbol string) (avg, high, low float64) {
 			low = p
 		}
 	}
-
 	avg = sum / float64(len(prices))
 	return
 }
 
-func FetchLast10Prices(symbol string) ([]float64, error) {
-	url := fmt.Sprintf("https://api.binance.com/api/v3/klines?symbol=%s&interval=1m&limit=10", symbol)
+// --- Fetch Function with Timeout ---
+func FetchLast10PricesWithTimeout(symbol string, timeout time.Duration) ([]float64, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
 
-	resp, err := http.Get(url)
+	url := fmt.Sprintf("https://api.binance.com/api/v3/klines?symbol=%s&interval=1m&limit=10", symbol)
+	req, _ := http.NewRequestWithContext(ctx, "GET", url, nil)
+
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("API returned status code %d", resp.StatusCode)
+		return nil, fmt.Errorf("API returned %d", resp.StatusCode)
 	}
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-
+	body, _ := io.ReadAll(resp.Body)
 	var klines [][]interface{}
 	if err := json.Unmarshal(body, &klines); err != nil {
 		return nil, err
@@ -81,61 +95,40 @@ func FetchLast10Prices(symbol string) ([]float64, error) {
 		if !ok {
 			continue
 		}
-		price, err := strconv.ParseFloat(closeStr, 64)
-		if err != nil {
-			continue
-		}
-		prices = append(prices, price)
+		p, _ := strconv.ParseFloat(closeStr, 64)
+		prices = append(prices, p)
 	}
 
 	return prices, nil
 }
 
+// --- Main ---
 func main() {
-	logger.Init()
-
-	symbol := "BTCUSDT"
-
-	logger.Info("Fetching last 10 prices for %s", symbol)
-
-	prices, err := FetchLast10Prices(symbol)
-	if err != nil {
-		logger.Error("Failed to fetch prices: %v", err)
-		return
-	}
-
+	symbols := []string{"BTCUSDT", "ETHUSDT", "BNBUSDT"}
 	store := NewPriceStore()
-	store.SetPrices(symbol, prices)
 
-	avg, high, low := store.GetStats(symbol)
+	var wg sync.WaitGroup
+	wg.Add(len(symbols))
 
-	// CSV save
-	err = SaveToCSV(symbol, store.GetPrices(symbol))
-	if err != nil {
-		logger.Error("Failed to save CSV: %v", err)
+	for _, sym := range symbols {
+		go func(s string) {
+			defer wg.Done()
+
+			prices, err := FetchLast10PricesWithTimeout(s, 5*time.Second)
+			if err != nil {
+				logError("Failed to fetch %s: %v", s, err)
+				return
+			}
+
+			store.SetPrices(s, prices)
+			logInfo("Fetched %s prices: %v", s, prices)
+
+			avg, high, low := store.GetStats(s)
+			logInfo("%s → Avg: %.2f, High: %.2f, Low: %.2f", s, avg, high, low)
+
+		}(sym)
 	}
 
-	// JSON save
-	exportData := ExportData{
-		Symbol:  symbol,
-		Prices:  store.GetPrices(symbol),
-		Average: avg,
-		Highest: high,
-		Lowest:  low,
-	}
-
-	err = SaveToJSON(exportData)
-	if err != nil {
-		logger.Error("Failed to save JSON: %v", err)
-	}
-
-	logger.Info("Data successfully exported to CSV and JSON")
-
-	fmt.Println("====================================")
-	fmt.Printf("Symbol: %s\n", symbol)
-	fmt.Printf("Last 10 Close Prices: %v\n", store.GetPrices(symbol))
-	fmt.Printf("Average Price: %.2f\n", avg)
-	fmt.Printf("Highest Price: %.2f\n", high)
-	fmt.Printf("Lowest Price: %.2f\n", low)
-	fmt.Println("====================================")
+	wg.Wait()
+	logInfo("All symbols fetched")
 }
